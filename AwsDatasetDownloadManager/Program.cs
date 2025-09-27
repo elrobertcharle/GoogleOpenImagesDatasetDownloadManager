@@ -1,7 +1,18 @@
 ﻿using AwsDatasetDownloadManager;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
+
+
 var cts = new CancellationTokenSource();
+
+var localPath = @"F:\Datasets\OpenImages\train";
+var table = "train_files";
+
+//await Db.ImportFast(@"C:\Users\elrob\train_files.txt", table);
+//return;
+
+
 
 // Cancel when Ctrl+C is pressed
 Console.CancelKeyPress += (sender, eventArgs) =>
@@ -12,6 +23,8 @@ Console.CancelKeyPress += (sender, eventArgs) =>
 };
 
 
+await Db.MarkAsDownloaded(localPath, "train/", table, cts.Token);
+
 try
 {
     await using var conn = new NpgsqlConnection(Db.GetConnectionString());
@@ -19,7 +32,7 @@ try
 
     while (!cts.IsCancellationRequested)
     {
-        var endOfDb = await Downloader.DownloadBatch(10, @"F:\Datasets\OpenImages\train", conn, cts.Token);
+        var endOfDb = await Downloader.DownloadBatchParallel(10, localPath, conn, cts.Token);
         if (endOfDb)
             return;
     }

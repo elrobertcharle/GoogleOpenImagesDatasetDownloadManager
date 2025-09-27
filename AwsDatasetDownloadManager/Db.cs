@@ -45,7 +45,7 @@ namespace AwsDatasetDownloadManager
             await conn.OpenAsync();
 
             // Binary COPY into train_files
-            await using var writer = await conn.BeginBinaryImportAsync($"COPY {table} (filename) FROM STDIN (FORMAT BINARY)");
+            await using var writer = await conn.BeginBinaryImportAsync($"COPY {table} (filename, filesize) FROM STDIN (FORMAT BINARY)");
 
             while (!sr.EndOfStream)
             {
@@ -55,9 +55,11 @@ namespace AwsDatasetDownloadManager
                     var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length >= 4)
                     {
+                        var fileSize = int.Parse(parts[2]);
                         var s3Filename = parts[3];
                         await writer.StartRowAsync();
                         await writer.WriteAsync(s3Filename, NpgsqlTypes.NpgsqlDbType.Text);
+                        await writer.WriteAsync(fileSize, NpgsqlTypes.NpgsqlDbType.Integer);
                     }
                 }
             }
@@ -65,7 +67,7 @@ namespace AwsDatasetDownloadManager
             await writer.CompleteAsync();
         }
 
-        public static async Task MarkAsDownloaded(string path, string prefix, string table)
+        public static async Task MarkAsDownloaded(string path, string prefix, string table, CancellationToken ct)
         {
             var files = Directory.GetFiles(path);
             var sb = new StringBuilder($"update {table} set downloaded = true where filename in (");
@@ -77,9 +79,9 @@ namespace AwsDatasetDownloadManager
             sb.Append(")");
             var command = sb.ToString();
             using var conn = new NpgsqlConnection(GetConnectionString());
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
             using var cmd = new NpgsqlCommand(sb.ToString(), conn);
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
     }
 }

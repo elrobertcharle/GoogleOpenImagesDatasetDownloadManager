@@ -72,5 +72,74 @@ namespace AwsDatasetDownloadManager
             }
             return endOfDb;
         }
+
+        public static async Task<bool> DownloadBatchParallel(int batchSize, string localFolder, NpgsqlConnection connection, CancellationToken ct)
+        {
+            bool endOfDb = false;
+
+            var files = new List<(int id, string filename)>();
+            using (var cmd = new NpgsqlCommand("SELECT id, filename FROM train_files WHERE downloaded = false LIMIT @limit", connection))
+            {
+                cmd.Parameters.AddWithValue("limit", batchSize);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    files.Add((reader.GetInt32(0), reader.GetString(1)));
+                }
+            }
+
+            if (files.Count == 0)
+                return true; // nothing left
+            if (files.Count < batchSize)
+                endOfDb = true;
+
+            Directory.CreateDirectory(localFolder);
+
+            var sw = Stopwatch.StartNew();
+
+            // Limit parallelism (e.g. 8 at a time)
+            var throttler = new SemaphoreSlim(8);
+
+            var downloadTasks = files.Select(async f =>
+            {
+                await throttler.WaitAsync(ct);
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    string localPath = Path.Combine(localFolder, Path.GetFileName(f.filename));
+
+                    var response = await s3Client.GetObjectAsync(bucketName, f.filename, ct);
+                    if (response.HttpStatusCode != System.Net.HttpStatusCode.OK)
+                        throw new Exception($"HttpStatusCode: " + response.HttpStatusCode);
+
+                    using var responseStream = response.ResponseStream;
+                    await using var fileStream = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true);
+                    await responseStream.CopyToAsync(fileStream, ct);
+
+                    return f.id; // return the ID to mark later
+                }
+                finally
+                {
+                    throttler.Release();
+                }
+            });
+
+            var completedIds = await Task.WhenAll(downloadTasks);
+
+            // Batch DB update
+            if (completedIds.Length > 0)
+            {
+                using var updateCmd = new NpgsqlCommand("UPDATE train_files SET downloaded = true WHERE id = ANY(@ids)", connection);
+                updateCmd.Parameters.AddWithValue("ids", completedIds);
+                await updateCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            sw.Stop();
+            Console.WriteLine($"Batch of {files.Count} finished in {sw.ElapsedMilliseconds} ms");
+
+            return endOfDb;
+        }
+
     }
 }
