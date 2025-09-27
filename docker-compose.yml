@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: OpenImages_Postgres_17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: pass#4o&6
+      POSTGRES_DB: OpenImages
+    ports:
+      - "5481:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
