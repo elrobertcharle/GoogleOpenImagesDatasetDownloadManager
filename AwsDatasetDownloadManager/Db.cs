@@ -15,13 +15,13 @@ namespace AwsDatasetDownloadManager
             return @"Host=localhost;Port=5481;Username=admin;Password=pass#4o&6;Database=OpenImages";
         }
 
-        public static async Task Import(string fileName)
+        public static async Task Import(string fileName, string table)
         {
             using var sr = File.OpenText(fileName);
 
             using var conn = new NpgsqlConnection(GetConnectionString());
             await conn.OpenAsync();
-            var command = "INSERT INTO train_files(filename) VALUES(@filename) ON CONFLICT DO NOTHING";
+            var command = $"INSERT INTO {table}(filename) VALUES(@filename) ON CONFLICT DO NOTHING";
             do
             {
                 var line = await sr.ReadLineAsync();
@@ -36,6 +36,50 @@ namespace AwsDatasetDownloadManager
                 }
             } while (!sr.EndOfStream);
 
+        }
+
+        public static async Task ImportFast(string fileName, string table)
+        {
+            using var sr = File.OpenText(fileName);
+            await using var conn = new NpgsqlConnection(GetConnectionString());
+            await conn.OpenAsync();
+
+            // Binary COPY into train_files
+            await using var writer = await conn.BeginBinaryImportAsync($"COPY {table} (filename) FROM STDIN (FORMAT BINARY)");
+
+            while (!sr.EndOfStream)
+            {
+                var line = await sr.ReadLineAsync();
+                if (line != null)
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 4)
+                    {
+                        var s3Filename = parts[3];
+                        await writer.StartRowAsync();
+                        await writer.WriteAsync(s3Filename, NpgsqlTypes.NpgsqlDbType.Text);
+                    }
+                }
+            }
+
+            await writer.CompleteAsync();
+        }
+
+        public static async Task MarkAsDownloaded(string path, string prefix, string table)
+        {
+            var files = Directory.GetFiles(path);
+            var sb = new StringBuilder($"update {table} set downloaded = true where filename in (");
+            for (var i = 0; i < files.Length; i++)
+            {
+                var separator = i < files.Length - 1 ? "," : "";
+                sb.Append($"'{prefix}{Path.GetFileName(files[i])}'{separator}");
+            }
+            sb.Append(")");
+            var command = sb.ToString();
+            using var conn = new NpgsqlConnection(GetConnectionString());
+            await conn.OpenAsync();
+            using var cmd = new NpgsqlCommand(sb.ToString(), conn);
+            await cmd.ExecuteNonQueryAsync();
         }
     }
 }
