@@ -6,10 +6,13 @@ using Npgsql;
 
 var cts = new CancellationTokenSource();
 
-var localPath = @"F:\Datasets\OpenImages\train";
-var table = "train_files";
+var localPath = @"E:\Datasets\OpenImages\validation";
+var table = "validation_files";
+var prefix = "validation/";
 
-//await Db.ImportFast(@"C:\Users\elrob\train_files.txt", table);
+//await Db.LeftoverFiles(localPath, prefix, table, cts.Token);
+
+//await Db.ImportFast(@"C:\Users\elrob\validation_files.txt", table);
 //return;
 
 
@@ -23,7 +26,7 @@ Console.CancelKeyPress += (sender, eventArgs) =>
 };
 
 
-await Db.MarkAsDownloaded(localPath, "train/", table, cts.Token);
+await Db.MarkAsDownloaded(localPath, prefix, table, cts.Token);
 
 try
 {
@@ -32,7 +35,7 @@ try
 
     while (!cts.IsCancellationRequested)
     {
-        var endOfDb = await Downloader.DownloadBatchParallel(10, localPath, conn, cts.Token);
+        var endOfDb = await Downloader.DownloadBatchParallel(10, table, localPath, conn, cts.Token);
         if (endOfDb)
             return;
     }

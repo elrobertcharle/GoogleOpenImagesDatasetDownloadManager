@@ -70,6 +70,8 @@ namespace AwsDatasetDownloadManager
         public static async Task MarkAsDownloaded(string path, string prefix, string table, CancellationToken ct)
         {
             var files = Directory.GetFiles(path);
+            if (files.Length == 0)
+                return;
             var sb = new StringBuilder($"update {table} set downloaded = true where filename in (");
             for (var i = 0; i < files.Length; i++)
             {
@@ -82,6 +84,33 @@ namespace AwsDatasetDownloadManager
             await conn.OpenAsync(ct);
             using var cmd = new NpgsqlCommand(sb.ToString(), conn);
             await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        public static async Task<List<string>> LeftoverFiles(string path, string prefix, string table, CancellationToken ct)
+        {
+            var files = Directory.GetFiles(path);
+            using var conn = new NpgsqlConnection(GetConnectionString());
+            await conn.OpenAsync(ct);
+
+            var fileNames = files.Select(f => prefix + Path.GetFileName(f)).ToList();
+
+            using var sqlCommand = new NpgsqlCommand(@$"
+            SELECT unnest(@filenames) AS fname
+            EXCEPT
+            SELECT filename FROM {table};", conn);
+
+            sqlCommand.Parameters.AddWithValue("filenames", fileNames);
+
+            using var reader = await sqlCommand.ExecuteReaderAsync(ct);
+            var result = new List<string>();
+            while (await reader.ReadAsync(ct))
+            {
+                var f = reader.GetString(0);
+                result.Add(f);
+                Console.WriteLine("Missing: " + f);
+            }
+
+            return result;
         }
     }
 }

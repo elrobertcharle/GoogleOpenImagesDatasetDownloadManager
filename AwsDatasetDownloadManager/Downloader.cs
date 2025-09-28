@@ -19,13 +19,13 @@ namespace AwsDatasetDownloadManager
             RegionEndpoint = Amazon.RegionEndpoint.USEast1
         });
 
-        public static async Task<bool> DownloadBatch(int batchSize, string localFolder, NpgsqlConnection connection, CancellationToken ct)
+        public static async Task<bool> DownloadBatch(int batchSize, string tableName, string localFolder, NpgsqlConnection connection, CancellationToken ct)
         {
             bool endOfDb = false;
 
             // Step 1: Get the next N files not yet downloaded
             var files = new List<(int id, string filename)>();
-            using (var cmd = new NpgsqlCommand("SELECT id, filename FROM train_files WHERE downloaded = false LIMIT @limit", connection))
+            using (var cmd = new NpgsqlCommand($"SELECT id, filename FROM {tableName} WHERE downloaded = false LIMIT @limit", connection))
             {
                 cmd.Parameters.AddWithValue("limit", batchSize);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -61,7 +61,7 @@ namespace AwsDatasetDownloadManager
                 await responseStream.CopyToAsync(fileStream, ct);
 
                 // Step 3: Mark as downloaded
-                using var updateCmd = new NpgsqlCommand("UPDATE train_files SET downloaded = true WHERE id = @id", connection);
+                using var updateCmd = new NpgsqlCommand($"UPDATE {tableName} SET downloaded = true WHERE id = @id", connection);
                 updateCmd.Parameters.AddWithValue("id", id);
                 await updateCmd.ExecuteNonQueryAsync(ct);
 
@@ -73,12 +73,12 @@ namespace AwsDatasetDownloadManager
             return endOfDb;
         }
 
-        public static async Task<bool> DownloadBatchParallel(int batchSize, string localFolder, NpgsqlConnection connection, CancellationToken ct)
+        public static async Task<bool> DownloadBatchParallel(int batchSize, string tableName, string localFolder, NpgsqlConnection connection, CancellationToken ct)
         {
             bool endOfDb = false;
 
             var files = new List<(int id, string filename)>();
-            using (var cmd = new NpgsqlCommand("SELECT id, filename FROM train_files WHERE downloaded = false LIMIT @limit", connection))
+            using (var cmd = new NpgsqlCommand($"SELECT id, filename FROM {tableName} WHERE downloaded = false LIMIT @limit", connection))
             {
                 cmd.Parameters.AddWithValue("limit", batchSize);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -130,7 +130,7 @@ namespace AwsDatasetDownloadManager
             // Batch DB update
             if (completedIds.Length > 0)
             {
-                using var updateCmd = new NpgsqlCommand("UPDATE train_files SET downloaded = true WHERE id = ANY(@ids)", connection);
+                using var updateCmd = new NpgsqlCommand($"UPDATE {tableName} SET downloaded = true WHERE id = ANY(@ids)", connection);
                 updateCmd.Parameters.AddWithValue("ids", completedIds);
                 await updateCmd.ExecuteNonQueryAsync(ct);
             }
